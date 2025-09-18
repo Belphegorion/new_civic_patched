@@ -1,0 +1,82 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: civic-mongo
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=SecureMongo123!
+    restart: unless-stopped
+    networks:
+      - civic-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: civic-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --requirepass SecureRedis123!
+    restart: unless-stopped
+    networks:
+      - civic-network
+    healthcheck:
+      test: redis-cli --raw incr ping
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: civic-backend
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongodb
+      - redis
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - civic-network
+    # healthcheck:
+    #   test: curl -f http://localhost:5000/health || exit 1
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Docker/Dockerfile
+    container_name: civic-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - civic-network
+    healthcheck:
+      test: curl -f http://localhost/ || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongo_data:
+
+networks:
+  civic-network:
+    driver: bridge

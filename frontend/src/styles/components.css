@@ -1,0 +1,105 @@
+/* Modern Component Utilities - Inspired by SalesRadar Design */
+
+/* Button Styles */
+.btn {
+  @apply inline-flex items-center justify-center px-6 py-3 text-sm font-semibold rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+}
+
+.btn-primary {
+  @apply btn bg-primary text-white hover:bg-primary-dark focus:ring-primary shadow-lg hover:shadow-xl;
+}
+
+.btn-secondary {
+  @apply btn bg-white text-primary border-2 border-primary hover:bg-primary hover:text-white focus:ring-primary;
+}
+
+.btn-outline {
+  @apply btn border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-primary bg-white;
+}
+
+.btn-sm {
+  @apply px-4 py-2 text-xs rounded-lg;
+}
+
+.btn-lg {
+  @apply px-8 py-4 text-base rounded-2xl;
+}
+
+/* Navigation Links */
+.nav-link {
+  @apply text-gray-600 hover:text-gray-900 transition-colors duration-200 font-medium;
+}
+
+/* Form Elements */
+.form-input {
+  @apply block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors;
+}
+
+.form-input-error {
+  @apply form-input border-red-500 focus:ring-red-500 focus:border-red-500;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-gray-900 mb-1;
+}
+
+.form-error {
+  @apply text-sm text-red-600 mt-1;
+}
+
+/* Card Styles - Clean and Modern */
+.card {
+  @apply bg-surface rounded-2xl shadow-card border border-border;
+}
+
+.card-hover {
+  @apply card hover:shadow-card-hover transition-all duration-200 hover:-translate-y-1;
+}
+
+.card-header {
+  @apply px-8 py-6 border-b border-border-light;
+}
+
+.card-body {
+  @apply px-8 py-6;
+}
+
+.card-feature {
+  @apply bg-surface rounded-3xl p-8 shadow-lg border border-border hover:shadow-xl transition-all duration-300;
+}
+
+/* Status Badges */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-success {
+  @apply badge bg-green-100 text-green-800;
+}
+
+.badge-warning {
+  @apply badge bg-yellow-100 text-yellow-800;
+}
+
+.badge-danger {
+  @apply badge bg-red-100 text-red-800;
+}
+
+.badge-info {
+  @apply badge bg-blue-100 text-blue-800;
+}
+
+/* Loading States */
+.loading-spinner {
+  @apply animate-spin rounded-full border-2 border-gray-300 border-t-indigo-600;
+}
+
+/* Accessibility */
+.sr-only {
+  @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
+}
+
+/* Focus Styles */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2;
+}
