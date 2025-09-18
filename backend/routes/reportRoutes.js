@@ -1,3 +1,4 @@
+// backend/routes/reportRoutes.js
 const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
@@ -5,52 +6,64 @@ const multer = require('multer');
 const { createReport, getReports, getReportById, updateReport, deleteReport } = require('../controllers/reportController');
 const { protect, admin } = require('../middleware/authMiddleware');
 
-// Multer setup for in-memory storage
+// Multer in-memory + fileFilter
 const storage = multer.memoryStorage();
-const _multer = multer({
-    storage: storage,
-    limits: { fileSize: 25 * 1024 * 1024 } // 25MB limit
-}).fields([
-    { name: 'photo', maxCount: 1 },
-    { name: 'audio', maxCount: 1 }
-]);
+const allowedImageMimes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+const allowedAudioMimes = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/mp3'];
 
-// Multer error handling wrapper
-const upload = (req, res, next) => {
-    _multer(req, res, (err) => {
-        if (err) {
-            console.error('[MULTER ERROR]', err);
-            if (err.code === 'LIMIT_FILE_SIZE') {
-                return res.status(413).json({ success: false, message: 'File is too large. Maximum size is 25MB.' });
-            }
-            return res.status(400).json({ success: false, message: err.message || 'File upload error' });
-        }
-        next();
-    });
+const fileFilter = (req, file, cb) => {
+  if (file.fieldname === 'photo') {
+    return allowedImageMimes.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid photo type'));
+  }
+  if (file.fieldname === 'audio') {
+    return allowedAudioMimes.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid audio type'));
+  }
+  return cb(new Error('Unexpected file field'));
 };
 
-// Validation chains
+const _multer = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter
+}).fields([
+  { name: 'photo', maxCount: 1 },
+  { name: 'audio', maxCount: 1 }
+]);
+
+// wrapper to capture multer errors
+const upload = (req, res, next) => {
+  _multer(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ success: false, message: 'File too large (max 25MB)' });
+      }
+      return res.status(400).json({ success: false, message: err.message || 'File upload error' });
+    }
+    next();
+  });
+};
+
+// Validations (example)
 const createReportValidation = [
-    body('title').notEmpty().withMessage('Title is required').trim().escape(),
-    body('description').notEmpty().withMessage('Description is required').trim().escape(),
-    body('category').notEmpty().withMessage('Category is required').trim().escape(),
-    body('latitude').isFloat({ min: -90, max: 90 }).withMessage('A valid latitude is required'),
-    body('longitude').isFloat({ min: -180, max: 180 }).withMessage('A valid longitude is required'),
+  body('title').trim().notEmpty().withMessage('Title is required'),
+  body('description').trim().notEmpty().withMessage('Description is required'),
+  body('category').trim().notEmpty().withMessage('Category is required'),
+  body('latitude').optional().isFloat({ min: -90, max: 90 }),
+  body('longitude').optional().isFloat({ min: -180, max: 180 }),
 ];
 
 const updateReportValidation = [
-    body('status').optional().isIn(['Submitted', 'Acknowledged', 'In Progress', 'Resolved', 'Rejected']),
-    body('assignedDepartment').optional().isMongoId().withMessage('Invalid department ID'),
+  body('status').optional().isIn(['Submitted', 'Acknowledged', 'In Progress', 'Resolved', 'Rejected']),
+  body('assignedDepartment').optional().isMongoId().withMessage('Invalid department ID'),
 ];
 
-// Consolidated and Corrected Routes
 router.route('/')
-    .post(protect, upload, createReportValidation, createReport)
-    .get(protect, getReports);
+  .post(protect, upload, createReportValidation, createReport)
+  .get(protect, getReports);
 
 router.route('/:id')
-    .get(protect, getReportById)
-    .patch(protect, admin, updateReportValidation, updateReport)
-    .delete(protect, admin, deleteReport);
+  .get(protect, getReportById)
+  .patch(protect, admin, updateReportValidation, updateReport)
+  .delete(protect, admin, deleteReport);
 
 module.exports = router;

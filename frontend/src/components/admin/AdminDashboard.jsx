@@ -1,47 +1,119 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useReports } from '../../contexts/ReportsContext.jsx';
-import InteractiveMap from '../shared/Map/InteractiveMap.jsx';
-import { 
-  ChartBarIcon, 
-  MapIcon, 
-  DocumentTextIcon, 
+// components/admin/AdminDashboard.jsx
+import React, { useState, useEffect, useRef } from "react";
+import { useReports } from "../../contexts/ReportsContext.jsx";
+import InteractiveMap from "../shared/Map/InteractiveMap.jsx";
+import {
+  ChartBarIcon,
+  MapIcon,
+  DocumentTextIcon,
   UsersIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
   ClockIcon,
   EyeIcon,
   XMarkIcon,
-  Bars3Icon
-} from '@heroicons/react/24/outline';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import { Bar, Line, Doughnut } from 'react-chartjs-2';
+  Bars3Icon,
+} from "@heroicons/react/24/outline";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+} from "chart.js";
+import { Bar, Line, Doughnut } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement);
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement
+);
 
 const AdminDashboard = () => {
   const { reports, loading, fetchReports } = useReports();
-  const [activeView, setActiveView] = useState('overview');
+  const [activeView, setActiveView] = useState("overview");
   const [isClient, setIsClient] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // New states for admin creation
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
+  const [inviteAdminId, setInviteAdminId] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+
   const sidebarRef = useRef(null);
 
   useEffect(() => {
     setIsClient(true);
     fetchReports();
   }, [fetchReports]);
-  
+
   // Close sidebar when clicking outside of it
   useEffect(() => {
     function handleClickOutside(event) {
-      if (sidebarRef.current && !sidebarRef.current.contains(event.target) && sidebarOpen) {
+      if (
+        sidebarRef.current &&
+        !sidebarRef.current.contains(event.target) &&
+        sidebarOpen
+      ) {
         setSidebarOpen(false);
       }
     }
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [sidebarOpen]);
+
+  // Create admin (protected endpoint)
+  const handleInvite = async (e) => {
+    e && e.preventDefault();
+    setInviteMessage("");
+
+    if (!inviteEmail || !invitePassword || !inviteAdminId) {
+      setInviteMessage("Please provide email, password and admin ID.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch("/api/admin/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify({
+          email: inviteEmail,
+          password: invitePassword,
+          adminId: inviteAdminId,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setInviteMessage(`✅ Admin ${inviteEmail} created/updated successfully.`);
+        setInviteEmail("");
+        setInvitePassword("");
+        setInviteAdminId("");
+      } else {
+        setInviteMessage(`❌ ${data.message || "Error creating admin"}`);
+      }
+    } catch (err) {
+      setInviteMessage(`❌ ${err.message}`);
+    }
+  };
 
   // Calculate statistics
   const stats = React.useMemo(() => {
@@ -53,31 +125,33 @@ const AdminDashboard = () => {
         resolved: 0,
         byCategory: {},
         recentReports: [],
-        monthlyData: []
+        monthlyData: [],
       };
     }
 
-    const pending = reports.filter(r => r.status === 'pending').length;
-    const inProgress = reports.filter(r => r.status === 'in-progress').length;
-    const resolved = reports.filter(r => r.status === 'resolved').length;
-    
+    const pending = reports.filter((r) => r.status === "pending").length;
+    const inProgress = reports.filter((r) => r.status === "in-progress")
+      .length;
+    const resolved = reports.filter((r) => r.status === "resolved").length;
+
     const byCategory = reports.reduce((acc, r) => {
       acc[r.category] = (acc[r.category] || 0) + 1;
       return acc;
     }, {});
 
     const recentReports = reports
+      .slice()
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 5);
 
     // Mock monthly data for demo
     const monthlyData = [
-      { month: 'Jan', reports: 45 },
-      { month: 'Feb', reports: 52 },
-      { month: 'Mar', reports: 48 },
-      { month: 'Apr', reports: 61 },
-      { month: 'May', reports: 55 },
-      { month: 'Jun', reports: 67 }
+      { month: "Jan", reports: 45 },
+      { month: "Feb", reports: 52 },
+      { month: "Mar", reports: 48 },
+      { month: "Apr", reports: 61 },
+      { month: "May", reports: 55 },
+      { month: "Jun", reports: 67 },
     ];
 
     return {
@@ -87,7 +161,7 @@ const AdminDashboard = () => {
       resolved,
       byCategory,
       recentReports,
-      monthlyData
+      monthlyData,
     };
   }, [reports]);
 
@@ -95,8 +169,12 @@ const AdminDashboard = () => {
     <div className="bg-card-bg rounded-xl sm:rounded-2xl p-3 sm:p-6 shadow-card hover:shadow-card-hover transition-shadow duration-200">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-text-secondary text-xs sm:text-sm font-medium truncate">{title}</p>
-          <p className="text-lg sm:text-2xl font-bold text-text-primary mt-1">{value}</p>
+          <p className="text-text-secondary text-xs sm:text-sm font-medium truncate">
+            {title}
+          </p>
+          <p className="text-lg sm:text-2xl font-bold text-text-primary mt-1">
+            {value}
+          </p>
           {trend && (
             <p className="text-xs text-secondary mt-1">+{trend}% from last month</p>
           )}
@@ -108,24 +186,33 @@ const AdminDashboard = () => {
     </div>
   );
 
-  const NavButton = ({ id, label, icon: Icon, isActive, onClick, showLabel = true }) => (
+  const NavButton = ({
+    id,
+    label,
+    icon: Icon,
+    isActive,
+    onClick,
+    showLabel = true,
+  }) => (
     <button
       onClick={() => onClick(id)}
-      className={`flex items-center ${showLabel ? 'space-x-2 sm:space-x-3' : 'justify-center'} px-3 sm:px-4 py-2 sm:py-3 rounded-xl transition-all duration-200 ${
-        isActive 
-          ? 'bg-primary text-white shadow-lg' 
-          : 'text-text-secondary hover:bg-light-gray hover:text-text-primary'
+      className={`flex items-center ${
+        showLabel ? "space-x-2 sm:space-x-3" : "justify-center"
+      } px-3 sm:px-4 py-2 sm:py-3 rounded-xl transition-all duration-200 ${
+        isActive
+          ? "bg-primary text-white shadow-lg"
+          : "text-text-secondary hover:bg-light-gray hover:text-text-primary"
       }`}
     >
       <Icon className="h-5 w-5" />
       {showLabel && <span className="text-sm sm:text-base font-medium">{label}</span>}
     </button>
   );
-  
+
   const MobileNavButton = ({ id, label, icon: Icon, isActive, onClick }) => (
     <button
       onClick={() => onClick(id)}
-      className={`flex flex-col items-center justify-center px-2 py-1 ${isActive ? 'text-primary' : 'text-text-secondary'}`}
+      className={`flex flex-col items-center justify-center px-2 py-1 ${isActive ? "text-primary" : "text-text-secondary"}`}
     >
       <Icon className="h-5 w-5 mb-1" />
       <span className="text-xs">{label}</span>
@@ -134,41 +221,47 @@ const AdminDashboard = () => {
 
   // Chart configurations
   const monthlyChartData = {
-    labels: stats.monthlyData.map(d => d.month),
-    datasets: [{
-      label: 'Reports',
-      data: stats.monthlyData.map(d => d.reports),
-      borderColor: '#6366F1',
-      backgroundColor: 'rgba(99, 102, 241, 0.1)',
-      borderWidth: 2,
-      fill: true,
-      tension: 0.4
-    }]
+    labels: stats.monthlyData.map((d) => d.month),
+    datasets: [
+      {
+        label: "Reports",
+        data: stats.monthlyData.map((d) => d.reports),
+        borderColor: "#6366F1",
+        backgroundColor: "rgba(99, 102, 241, 0.1)",
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+      },
+    ],
   };
 
   const categoryChartData = {
     labels: Object.keys(stats.byCategory),
-    datasets: [{
-      data: Object.values(stats.byCategory),
-      backgroundColor: [
-        '#6366F1',
-        '#10B981',
-        '#F59E0B',
-        '#EF4444',
-        '#8B5CF6',
-        '#EC4899'
-      ],
-      borderWidth: 0
-    }]
+    datasets: [
+      {
+        data: Object.values(stats.byCategory),
+        backgroundColor: [
+          "#6366F1",
+          "#10B981",
+          "#F59E0B",
+          "#EF4444",
+          "#8B5CF6",
+          "#EC4899",
+        ],
+        borderWidth: 0,
+      },
+    ],
   };
 
   const statusChartData = {
-    labels: ['Pending', 'In Progress', 'Resolved'],
-    datasets: [{
-      data: [stats.pending, stats.inProgress, stats.resolved],
-      backgroundColor: ['#F59E0B', '#3B82F6', '#10B981'],
-      borderWidth: 0
-    }]
+    labels: ["Pending", "In Progress", "Resolved"],
+    datasets: [
+      {
+        data: [stats.pending, stats.inProgress, stats.resolved],
+        backgroundColor: ["#F59E0B", "#3B82F6", "#10B981"],
+        borderWidth: 0,
+      },
+    ],
   };
 
   const chartOptions = {
@@ -176,21 +269,21 @@ const AdminDashboard = () => {
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        display: false
-      }
+        display: false,
+      },
     },
     scales: {
       x: {
         grid: {
-          display: false
-        }
+          display: false,
+        },
       },
       y: {
         grid: {
-          color: '#F1F5F9'
-        }
-      }
-    }
+          color: "#F1F5F9",
+        },
+      },
+    },
   };
 
   const doughnutOptions = {
@@ -198,37 +291,27 @@ const AdminDashboard = () => {
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        position: 'bottom',
+        position: "bottom",
         labels: {
           padding: 20,
-          usePointStyle: true
-        }
-      }
-    }
+          usePointStyle: true,
+        },
+      },
+    },
   };
 
   // Add a useEffect to prevent iOS zoom on input focus
   useEffect(() => {
-    const metaViewport = document.querySelector('meta[name=viewport]');
+    const metaViewport = document.querySelector("meta[name=viewport]");
     if (metaViewport) {
-      metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1');
+      metaViewport.setAttribute(
+        "content",
+        "width=device-width, initial-scale=1, maximum-scale=1"
+      );
     }
     return () => {
       if (metaViewport) {
-        metaViewport.setAttribute('content', 'width=device-width, initial-scale=1');
-      }
-    };
-  }, []);
-
-  // Add meta viewport to prevent iOS zoom on input focus
-  useEffect(() => {
-    const metaViewport = document.querySelector('meta[name=viewport]');
-    if (metaViewport) {
-      metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1');
-    }
-    return () => {
-      if (metaViewport) {
-        metaViewport.setAttribute('content', 'width=device-width, initial-scale=1');
+        metaViewport.setAttribute("content", "width=device-width, initial-scale=1");
       }
     };
   }, []);
@@ -240,8 +323,8 @@ const AdminDashboard = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center">
             {/* Mobile menu button */}
-            <button 
-              className="mr-3 md:hidden text-text-primary" 
+            <button
+              className="mr-3 md:hidden text-text-primary"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -271,9 +354,9 @@ const AdminDashboard = () => {
         )}
 
         {/* Sidebar */}
-        <div 
+        <div
           ref={sidebarRef}
-          className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static top-0 left-0 h-full z-20 w-64 bg-card-bg border-r border-border-light p-4 sm:p-6 transition-transform duration-300 ease-in-out`}
+          className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 fixed md:static top-0 left-0 h-full z-20 w-64 bg-card-bg border-r border-border-light p-4 sm:p-6 transition-transform duration-300 ease-in-out`}
         >
           <div className="flex justify-between items-center mb-6 md:hidden">
             <h2 className="font-bold text-lg text-text-primary">Navigation</h2>
@@ -284,106 +367,35 @@ const AdminDashboard = () => {
             </button>
           </div>
           <nav className="space-y-2">
-            <NavButton
-              id="overview"
-              label="Overview"
-              icon={ChartBarIcon}
-              isActive={activeView === 'overview'}
-              onClick={(id) => {
-                setActiveView(id);
-                setSidebarOpen(false);
-              }}
-            />
-            <NavButton
-              id="map"
-              label="Live Map"
-              icon={MapIcon}
-              isActive={activeView === 'map'}
-              onClick={(id) => {
-                setActiveView(id);
-                setSidebarOpen(false);
-              }}
-            />
-            <NavButton
-              id="reports"
-              label="All Reports"
-              icon={DocumentTextIcon}
-              isActive={activeView === 'reports'}
-              onClick={(id) => {
-                setActiveView(id);
-                setSidebarOpen(false);
-              }}
-            />
+            <NavButton id="overview" label="Overview" icon={ChartBarIcon} isActive={activeView === "overview"} onClick={(id) => { setActiveView(id); setSidebarOpen(false); }} />
+            <NavButton id="map" label="Live Map" icon={MapIcon} isActive={activeView === "map"} onClick={(id) => { setActiveView(id); setSidebarOpen(false); }} />
+            <NavButton id="reports" label="All Reports" icon={DocumentTextIcon} isActive={activeView === "reports"} onClick={(id) => { setActiveView(id); setSidebarOpen(false); }} />
+            {/* Manage Admins button (new) */}
+            <NavButton id="admins" label="Manage Admins" icon={UsersIcon} isActive={activeView === "admins"} onClick={(id) => { setActiveView(id); setSidebarOpen(false); }} />
           </nav>
         </div>
 
         {/* Bottom mobile navigation */}
         <div className="fixed bottom-0 left-0 right-0 bg-card-bg border-t border-border-light p-2 flex justify-around md:hidden z-10">
-          <NavButton
-            id="overview"
-            label="Overview"
-            icon={ChartBarIcon}
-            isActive={activeView === 'overview'}
-            onClick={setActiveView}
-            showLabel={false}
-          />
-          <NavButton
-            id="map"
-            label="Map"
-            icon={MapIcon}
-            isActive={activeView === 'map'}
-            onClick={setActiveView}
-            showLabel={false}
-          />
-          <NavButton
-            id="reports"
-            label="Reports"
-            icon={DocumentTextIcon}
-            isActive={activeView === 'reports'}
-            onClick={setActiveView}
-            showLabel={false}
-          />
+          <NavButton id="overview" label="Overview" icon={ChartBarIcon} isActive={activeView === "overview"} onClick={setActiveView} showLabel={false} />
+          <NavButton id="map" label="Map" icon={MapIcon} isActive={activeView === "map"} onClick={setActiveView} showLabel={false} />
+          <NavButton id="reports" label="Reports" icon={DocumentTextIcon} isActive={activeView === "reports"} onClick={setActiveView} showLabel={false} />
         </div>
 
         {/* Main Content */}
         <div className="flex-1 p-4 sm:p-6 pb-16 md:pb-6">
-          {activeView === 'overview' && (
+          {activeView === "overview" && (
             <div className="space-y-6">
               {/* Stats Grid */}
               <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
-                <StatCard
-                  title="Total Reports"
-                  value={stats.total}
-                  icon={DocumentTextIcon}
-                  color="bg-primary"
-                  trend="12"
-                />
-                <StatCard
-                  title="Pending"
-                  value={stats.pending}
-                  icon={ClockIcon}
-                  color="bg-warning"
-                  trend="8"
-                />
-                <StatCard
-                  title="In Progress"
-                  value={stats.inProgress}
-                  icon={ExclamationTriangleIcon}
-                  color="bg-info"
-                  trend="15"
-                />
-                <StatCard
-                  title="Resolved"
-                  value={stats.resolved}
-                  icon={CheckCircleIcon}
-                  color="bg-secondary"
-                  trend="23"
-                />
+                <StatCard title="Total Reports" value={stats.total} icon={DocumentTextIcon} color="bg-primary" trend="12" />
+                <StatCard title="Pending" value={stats.pending} icon={ClockIcon} color="bg-warning" trend="8" />
+                <StatCard title="In Progress" value={stats.inProgress} icon={ExclamationTriangleIcon} color="bg-info" trend="15" />
+                <StatCard title="Resolved" value={stats.resolved} icon={CheckCircleIcon} color="bg-secondary" trend="23" />
               </div>
 
               {/* Charts Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-                {/* Monthly Trend */}
                 <div className="bg-card-bg rounded-2xl p-4 sm:p-6 shadow-card">
                   <h3 className="text-lg font-semibold text-text-primary mb-4">Monthly Trend</h3>
                   <div className="h-64">
@@ -391,7 +403,6 @@ const AdminDashboard = () => {
                   </div>
                 </div>
 
-                {/* Status Distribution */}
                 <div className="bg-card-bg rounded-2xl p-4 sm:p-6 shadow-card">
                   <h3 className="text-lg font-semibold text-text-primary mb-4">Status Distribution</h3>
                   <div className="h-64">
@@ -418,9 +429,7 @@ const AdminDashboard = () => {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-medium text-text-primary capitalize">{report.status}</p>
-                        <p className="text-xs text-text-secondary">
-                          {new Date(report.createdAt).toLocaleDateString()}
-                        </p>
+                        <p className="text-xs text-text-secondary">{new Date(report.createdAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                   ))}
@@ -429,7 +438,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {activeView === 'map' && (
+          {activeView === "map" && (
             <div className="bg-card-bg rounded-2xl p-4 sm:p-6 shadow-card">
               <h3 className="text-lg font-semibold text-text-primary mb-4">Live Reports Map</h3>
               <div className="h-96 rounded-xl overflow-hidden border border-border-light">
@@ -438,7 +447,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {activeView === 'reports' && (
+          {activeView === "reports" && (
             <div className="bg-card-bg rounded-2xl p-4 sm:p-6 shadow-card">
               <h3 className="text-lg font-semibold text-text-primary mb-4">All Reports</h3>
               <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -466,9 +475,7 @@ const AdminDashboard = () => {
                             {report.status}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-text-secondary">
-                          {new Date(report.createdAt).toLocaleDateString()}
-                        </td>
+                        <td className="py-3 px-4 text-text-secondary">{new Date(report.createdAt).toLocaleDateString()}</td>
                         <td className="py-3 px-4">
                           <button className="text-primary hover:text-primary-light">
                             <EyeIcon className="h-4 w-4" />
@@ -479,6 +486,59 @@ const AdminDashboard = () => {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {activeView === "admins" && (
+            <div className="bg-card-bg p-6 rounded-2xl shadow space-y-4 max-w-xl">
+              <h3 className="text-lg font-semibold text-text-primary mb-4">Manage Admins</h3>
+
+              <form onSubmit={handleInvite} className="space-y-3">
+                <div>
+                  <label className="block text-sm text-text-secondary">Email</label>
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="admin@example.com"
+                    required
+                    className="w-full border border-border-light rounded-lg p-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-text-secondary">Password</label>
+                  <input
+                    type="password"
+                    value={invitePassword}
+                    onChange={(e) => setInvitePassword(e.target.value)}
+                    placeholder="Choose a secure password"
+                    required
+                    className="w-full border border-border-light rounded-lg p-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-text-secondary">Admin ID (unique)</label>
+                  <input
+                    type="text"
+                    value={inviteAdminId}
+                    onChange={(e) => setInviteAdminId(e.target.value)}
+                    placeholder="e.g. ADC5252"
+                    required
+                    className="w-full border border-border-light rounded-lg p-2"
+                  />
+                  <p className="text-xs text-text-secondary mt-1">This Admin ID will be required when the admin logs in.</p>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark">
+                    Create Admin
+                  </button>
+                </div>
+              </form>
+
+              {inviteMessage && <p className="text-sm">{inviteMessage}</p>}
             </div>
           )}
         </div>

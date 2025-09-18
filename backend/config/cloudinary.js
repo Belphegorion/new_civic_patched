@@ -2,7 +2,7 @@ const cloudinary = require('cloudinary').v2;
 const streamifier = require('streamifier');
 
 cloudinary.config({
-  cloud_name: process.env.BACKEND_CLOUDINARY_CLOUD_NAME,
+  cloud_name: process.env.djmvzcvyi,
   api_key: process.env.BACKEND_CLOUDINARY_API_KEY,
   api_secret: process.env.BACKEND_CLOUDINARY_API_SECRET,
 });

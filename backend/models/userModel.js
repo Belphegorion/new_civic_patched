@@ -1,3 +1,4 @@
+// backend/models/userModel.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -54,7 +55,15 @@ const userSchema = new mongoose.Schema({
     lockUntil: Date,
     passwordChangedAt: Date,
     passwordResetToken: String,
-    passwordResetExpires: Date
+    passwordResetExpires: Date,
+
+    // NEW: store bcrypt hash of admin ID (one-way). Only set for Admin accounts.
+    adminIdHash: {
+        type: String,
+        select: false,
+        default: ''
+    }
+
 }, { 
     timestamps: true,
     toJSON: { 
@@ -64,6 +73,7 @@ const userSchema = new mongoose.Schema({
             delete ret.passwordResetExpires;
             delete ret.loginAttempts;
             delete ret.lockUntil;
+            delete ret.adminIdHash; // remove adminIdHash from JSON output
             return ret;
         }
     }
@@ -98,6 +108,12 @@ userSchema.pre('save', async function(next) {
 userSchema.methods.matchPassword = async function(enteredPassword) {
     if (!enteredPassword || !this.password) return false;
     return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// NEW: Method to check admin ID
+userSchema.methods.matchAdminId = async function (enteredAdminId) {
+    if (!enteredAdminId || !this.adminIdHash) return false;
+    return await bcrypt.compare(enteredAdminId, this.adminIdHash);
 };
 
 // Method to handle failed login attempts

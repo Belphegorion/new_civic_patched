@@ -1,3 +1,4 @@
+// server.js
 // --- Core Node.js and Express Imports ---
 const http = require('http');
 const express = require('express');
@@ -102,7 +103,7 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// API Routes
+// API Routes - existing
 const authRoutes = require('./routes/authRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -110,12 +111,21 @@ const departmentRoutes = require('./routes/departmentRoutes');
 const geocodeRoutes = require('./routes/geocodeRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 
+// NEW: admin-management & admin-auth routes (additive)
+const adminManagementRoutes = require('./routes/adminManagementRoutes'); // POST /api/admin/create (protected)
+const authAdminRoutes = require('./routes/authAdminRoutes');           // POST /api/auth/admin-login (public)
+
+// Mount existing routes (keeps all current functionality)
 app.use('/api/auth', authRoutes);
 app.use('/api/reports', reportRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminRoutes);              // existing adminRoutes (keep)
 app.use('/api/departments', departmentRoutes);
 app.use('/api/geocode', geocodeRoutes);
 app.use('/api/analytics', analyticsRoutes);
+
+// Mount the new routes — these are additive and do not remove any existing route handlers
+app.use('/api/admin', adminManagementRoutes);   // adds /api/admin/create (protected)
+app.use('/api/auth', authAdminRoutes);          // adds /api/auth/admin-login
 
 // ====================================================================
 // --- Error Handling Middleware (Must be last) ---

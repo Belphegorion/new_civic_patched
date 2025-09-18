@@ -1,3 +1,4 @@
+// backend/middleware/authMiddleware.js
 const User = require('../models/userModel');
 const authService = require('../services/authService');
 
@@ -21,15 +22,15 @@ const protect = async (req, res, next) => {
             // Verify token
             const decoded = authService.verifyToken(token);
             
-            // Check if token is expired
+            // Check if token is expired (authService may throw, but we keep the check)
             if (decoded.exp * 1000 < Date.now()) {
                 return res.status(401).json({ 
                     message: 'Token has expired. Please login again.' 
                 });
             }
             
-            // Get user from database
-            const user = await User.findById(decoded.id).select('-password');
+            // Get user from database. Also explicitly exclude sensitive fields including adminIdHash.
+            const user = await User.findById(decoded.id).select('-password -adminIdHash');
             if (!user) {
                 return res.status(401).json({ 
                     message: 'User no longer exists. Please login again.' 
@@ -43,7 +44,7 @@ const protect = async (req, res, next) => {
                 });
             }
             
-            // Check if password was changed after token was issued
+            // Check if password was changed after token was issued (decoded.iat)
             if (user.changedPasswordAfter(decoded.iat)) {
                 return res.status(401).json({ 
                     message: 'Password was recently changed. Please login again.' 

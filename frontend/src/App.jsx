@@ -9,6 +9,7 @@ import NotificationPanel from './components/layout/NotificationPanel.jsx';
 import NotificationSystem from './components/shared/NotificationSystem.jsx';
 import LoadingSpinner from './components/shared/LoadingSpinner.jsx';
 import ReportForm from './components/citizen/ReportForm.jsx';
+import AdminAcceptInvite from './pages/AdminAcceptInvite';
 
 // Lazy load pages for better performance
 const LandingPage = React.lazy(() => import('./pages/LandingPage.jsx'));
@@ -18,6 +19,7 @@ const CitizenDashboard = React.lazy(() => import('./pages/CitizenDashboard.jsx')
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard.jsx'));
 const ReportDetailsPage = React.lazy(() => import('./pages/ReportDetailsPage.jsx'));
 const TestAuth = React.lazy(() => import('./pages/TestAuth.jsx'));
+
 
 function App() {
   const [showReportForm, setShowReportForm] = useState(false);
@@ -40,6 +42,7 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/test-auth" element={<TestAuth />} />
+              <Route path="/admin/accept-invite" element={<AdminAcceptInvite />} />
 
               {/* Protected Routes */}
               <Route path="/dashboard" element={

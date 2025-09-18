@@ -251,7 +251,7 @@ const BlogHero = ({ items = [], autoRotateInterval = 4500, showDots = false }) =
       const t = setTimeout(() => centerCardInContainer(el), 60);
       return () => clearTimeout(t);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, [currentIndex]);
 
   return (

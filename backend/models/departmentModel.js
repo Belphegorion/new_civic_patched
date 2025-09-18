@@ -1,37 +1,30 @@
+// backend/models/departmentModel.js
 const mongoose = require('mongoose');
 
+const categoryEnum = [
+  'Pothole',
+  'Streetlight Out',
+  'Trash Overflow',
+  'Graffiti',
+  'Water Leak',
+  'Traffic Signal',
+  'Park Maintenance',
+  'Other'
+];
+
 const departmentSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
-  description: {
-    type: String,
-    required: true
-  },
+  name: { type: String, required: true, unique: true, trim: true },
+  description: { type: String, default: '' },
   contactEmail: {
     type: String,
-    required: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
+    trim: true,
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please provide a valid email'],
+    default: ''
   },
-  contactPhone: {
-    type: String,
-    required: true
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  categories: [{
-    type: String,
-    enum: ['Pothole', 'Streetlight Out', 'Trash Overflow', 'Graffiti', 'Water Leak', 'Traffic Signal', 'Park Maintenance', 'Other']
-  }],
-  responseTimeTarget: {
-    type: Number, // hours
-    default: 24
-  }
+  contactPhone: { type: String, default: '' },
+  isActive: { type: Boolean, default: true },
+  categories: [{ type: String, enum: categoryEnum }],
+  responseTimeTarget: { type: Number, default: 24 }
 }, { timestamps: true });
 
 departmentSchema.index({ name: 1 });
