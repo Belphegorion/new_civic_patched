@@ -1,0 +1,3 @@
+mc.exe: <ERROR> Unable to set bucket CORS configuration for myminio/uploads: decoding xml: EOF
+ (0) github.com/minio/mc/cmd/client-s3.go:3062 cmd.(*S3Client).SetBucketCors(..)
+ Release-Tag:RELEASE.2025-08-29T21-30-41Z | Commit:f7560841be16 | Host:LAPTOP-JJSN233P | OS:windows | Arch:amd64 | Lang:go1.24.6 | Mem:8.3 MiB/18 MiB | Heap:8.3 MiB/12 MiB.

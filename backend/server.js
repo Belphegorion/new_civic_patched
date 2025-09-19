@@ -104,6 +104,8 @@ app.get('/health', async (req, res) => {
 });
 
 // API Routes - existing
+// top of file with other requires
+const uploadRoutes = require('./routes/uploadRoutes');
 const authRoutes = require('./routes/authRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -116,6 +118,7 @@ const adminManagementRoutes = require('./routes/adminManagementRoutes'); // POST
 const authAdminRoutes = require('./routes/authAdminRoutes');           // POST /api/auth/admin-login (public)
 
 // Mount existing routes (keeps all current functionality)
+app.use('/api/uploads', uploadRoutes); // <-- add this line
 app.use('/api/auth', authRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/admin', adminRoutes);              // existing adminRoutes (keep)

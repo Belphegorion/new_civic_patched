@@ -104,6 +104,23 @@ services:
       retries: 3
       start_period: 10s
 
+  minio:
+    image: quay.io/minio/minio
+    container_name: minio
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_API_CORS_ALLOW_ORIGIN=http://127.0.0.1:3000,http://localhost:3000
+    volumes:
+      - C:/Users/atlas/minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      - civic-network
+
   worker:
     build:
       context: ./backend

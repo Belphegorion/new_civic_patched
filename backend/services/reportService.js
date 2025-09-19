@@ -15,12 +15,11 @@ const { analyzeImage } = require('./aiService');
 const createReport = async (reportData) => {
   const { title, description, category, citizen, location, files = {} } = reportData;
 
-  // Basic validation
   if (!title || !description || !category) {
     throw new Error('Missing required fields for creating report (title/description/category).');
   }
 
-  // Analyze photo (if present) BEFORE upload if buffer available
+  // AI analysis
   let aiResult = { tags: [], determinedCategory: category, severityScore: 0, damageAreaPercent: 0 };
   if (files.photo && files.photo.length > 0 && files.photo[0].buffer) {
     try {
@@ -28,38 +27,32 @@ const createReport = async (reportData) => {
     } catch (err) {
       console.warn('AI analysis failed (non-fatal):', err.message || err);
     }
-  } else {
-    // If no buffer but an external URL was provided (rare), try that:
-    if (files.photo && files.photo.length > 0 && files.photo[0].url) {
-      try {
-        aiResult = await analyzeImage(files.photo[0].url);
-      } catch (err) {
-        console.warn('AI analysis from URL failed:', err.message || err);
-      }
+  } else if (files.photo && files.photo.length > 0 && files.photo[0].url) {
+    try {
+      aiResult = await analyzeImage(files.photo[0].url);
+    } catch (err) {
+      console.warn('AI analysis from URL failed:', err.message || err);
     }
   }
 
-  // Upload photo if present (cloudinary)
+  // Photo upload
   let photoUploadResult = null;
   if (files.photo && files.photo.length > 0 && files.photo[0].buffer) {
-    const photoFile = files.photo[0];
     try {
-      photoUploadResult = await uploadFromBuffer(photoFile.buffer, {
+      photoUploadResult = await uploadFromBuffer(files.photo[0].buffer, {
         folder: 'civic-reports/photos',
         resource_type: 'image'
       });
     } catch (err) {
       console.warn('Photo upload failed:', err.message || err);
-      // continue — you may want to throw depending on your requirements
     }
   }
 
-  // Upload audio if present
+  // Audio upload
   let audioUploadResult = null;
   if (files.audio && files.audio.length > 0) {
-    const audioFile = files.audio[0];
     try {
-      audioUploadResult = await uploadFromBuffer(audioFile.buffer, {
+      audioUploadResult = await uploadFromBuffer(files.audio[0].buffer, {
         folder: 'civic-reports/audio',
         resource_type: 'video'
       });
@@ -68,7 +61,7 @@ const createReport = async (reportData) => {
     }
   }
 
-  // Determine department: prefer AI-determined category, otherwise mapping from submitted category
+  // Determine department
   const effectiveCategory = aiResult.determinedCategory || category;
   const departmentName = categoryToDepartmentMap[effectiveCategory] || 'Unassigned';
   const department = await Department.findOneAndUpdate(
@@ -88,17 +81,27 @@ const createReport = async (reportData) => {
     photoCloudinaryId: photoUploadResult ? photoUploadResult.public_id : undefined,
     audioUrl: audioUploadResult ? audioUploadResult.secure_url : undefined,
     audioCloudinaryId: audioUploadResult ? audioUploadResult.public_id : undefined,
-
-    // AI fields:
     aiTags: aiResult.tags || [],
-    severityScore: aiResult.severityScore || 0,         // 0..100
-    damageAreaPercent: aiResult.damageAreaPercent || 0, // 0..1
+    severityScore: aiResult.severityScore || 0,
+    damageAreaPercent: aiResult.damageAreaPercent || 0,
   });
 
   return await newReport.save();
 };
 
+// NEW: fetch all reports
+const getAllReports = async () => {
+  return await Report.find().populate('assignedDepartment').populate('citizen');
+};
+
+// NEW: fetch report by ID
+const getReportById = async (id) => {
+  return await Report.findById(id).populate('assignedDepartment').populate('citizen');
+};
+
+// Export everything
 module.exports = {
   createReport,
-  // other methods omitted for brevity - keep your existing ones
+  getAllReports,
+  getReportById,
 };

@@ -104,9 +104,25 @@ function buildAnalysisPayloadForReport(report) {
 
 const getReports = async (req, res, next) => {
   try {
-    const pageSize = parseInt(req.query.limit) || 20;
-    const page = parseInt(req.query.page) || 1;
-    const query = req.user.role === 'Admin' ? {} : { citizen: req.user._id };
+    const pageSize = parseInt(req.query.limit, 10) || 20;
+const page = parseInt(req.query.page, 10) || 1;
+
+// defensive handling for different token/user shapes
+const userRole = req.user && (req.user.role || req.user?.role);
+const userId = req.user && (req.user._id || req.user.id || req.user); // cover decoded token shapes
+
+let query;
+if (userRole === 'Admin') {
+  query = {};
+} else {
+  // if no userId available, fail gracefully (avoid throwing)
+  if (!userId) {
+    console.error('[reportController.getReports] No user id present on req.user:', req.user);
+    return res.status(400).json({ message: 'Missing user id for report listing' });
+  }
+  query = { citizen: userId };
+}
+
 
     const { reports, count } = await reportService.getAllReports(query, page, pageSize);
     res.status(200).json({ reports, page, pages: Math.ceil(count / pageSize), total: count });
