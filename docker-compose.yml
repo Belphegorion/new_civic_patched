@@ -109,7 +109,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: civic-worker
-    command: node ./queues/imageAnalysisWorker.js
+    command: node workers/imageAnalysisWorker.js
     env_file:
       - .env
     depends_on:
