@@ -1,61 +1,63 @@
 // backend/scripts/createAdmin.js
+require('dotenv').config();
 const mongoose = require('mongoose');
 const readline = require('readline');
+const User = require('../models/userModel'); // adjust path
 const bcrypt = require('bcryptjs');
-require('dotenv').config();
 
-const User = require('../models/userModel');
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('MONGODB_URI not set in env');
+  process.exit(1);
+}
 
-const prompt = (query) =>
-  new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(query, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
+async function ask(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(resolve => rl.question(question, ans => { rl.close(); resolve(ans); }));
+}
 
-(async () => {
-  try {
-    const mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI;
-    if (!mongoURI) {
-      console.error('MONGODB_URI (or MONGO_URI) must be provided as an environment variable.');
-      process.exit(1);
-    }
+async function run() {
+  await mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
-    await mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true });
+  const emailArg = process.argv.find(a => a.startsWith('--email='));
+  const passwordArg = process.argv.find(a => a.startsWith('--password='));
+  const adminIdArg = process.argv.find(a => a.startsWith('--adminId='));
 
-    let email = process.env.ADMIN_EMAIL;
-    let password = process.env.ADMIN_PASSWORD;
+  const email = emailArg ? emailArg.split('=')[1] : (await ask('Admin email: '));
+  let password = passwordArg ? passwordArg.split('=')[1] : (await ask('Admin password (min 8 chars): '));
+  const adminId = adminIdArg ? adminIdArg.split('=')[1] : (await ask('Admin ID (e.g. ADC5252): '));
 
-    if (!email) email = (await prompt('Admin email: ')).trim();
-    if (!password) password = (await prompt('Admin password: ')).trim();
-
-    if (!email || !password) {
-      console.error('Email and password are required.');
-      process.exit(1);
-    }
-
-    // Remove any existing user with this email (idempotent)
-    await User.deleteMany({ email });
-
-    // Hash password (if your model already hashes in pre-save hook, adjust accordingly)
-    const salt = await bcrypt.genSalt(10);
-    const hashed = await bcrypt.hash(password, salt);
-
-    const admin = await User.create({
-      email,
-      password: hashed,
-      role: 'admin',
-      isActive: true,
-    });
-
-    console.log('Admin user created successfully.');
-    console.log(`Email: ${admin.email}`);
-    console.log('Password: (not displayed for security reasons)');
-    process.exit(0);
-  } catch (err) {
-    console.error('Error creating admin:', err.message || err);
+  if (!email || !password || !adminId) {
+    console.error('email, password and adminId are required');
     process.exit(1);
   }
-})();
+
+  // Upsert user and mark as Admin
+  let user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password +adminIdHash').catch(() => null);
+  if (user) {
+    user.password = password;
+    user.role = 'Admin';
+    user.adminIdHash = await bcrypt.hash(adminId, 12);
+    user.isActive = true;
+    await user.save();
+    console.log('Existing user updated to Admin:', email);
+  } else {
+    user = new User({
+      email: email.toLowerCase().trim(),
+      password,
+      role: 'Admin',
+      isActive: true,
+      adminIdHash: await bcrypt.hash(adminId, 12)
+    });
+    await user.save();
+    console.log('New admin created:', email);
+  }
+
+  await mongoose.disconnect();
+  process.exit(0);
+}
+
+run().catch(err => {
+  console.error('Error creating admin:', err);
+  process.exit(1);
+});

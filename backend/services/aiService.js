@@ -1,187 +1,281 @@
 // backend/services/aiService.js
-/**
- * AI image analysis service
- *
- * - classify image using MobileNet (tfjs)
- * - compute a damage-area heuristic using Sobel edge detection on a resized greyscale image (sharp)
- * - compute a severity score from (topProbability * (0.6 + 0.4 * damageAreaPercent))
- *
- * Returns:
- * {
- *   tags: [{ className, probability }],
- *   determinedCategory: 'Pothole'|'Streetlight Out'|...|'Other',
- *   severityScore: 0..100,          // integer
- *   damageAreaPercent: 0..1        // fraction of pixels that are "edges"
- * }
- *
- * Notes:
- * - This is intended as a lightweight on-prem inference layer for prototyping.
- * - For production / large scale, consider a separate inference service (GPU instances) or an external model API.
- */
+'use strict';
 
-const tf = require('@tensorflow/tfjs-node');
-const mobilenet = require('@tensorflow-models/mobilenet');
-const sharp = require('sharp');
-const fetch = require('node-fetch'); // or global fetch on Node >=18
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+const crypto = require('crypto');
 
-let modelPromise = null;
-const loadModel = async () => {
-  if (!modelPromise) {
-    // Mobilenet v2 (alpha 1.0) is a good tradeoff between accuracy and size
-    modelPromise = mobilenet.load({ version: 2, alpha: 1.0 });
+const MODEL_SERVICE_URL = process.env.MODEL_SERVICE_URL || ''; // internal modelservice (fastapi) e.g. http://modelservice:8000
+const HF_API_BASE = (process.env.HUGGINGFACE_API_URL || 'https://api-inference.huggingface.co/models').replace(/\/$/, '');
+const HF_MODEL = process.env.HUGGINGFACE_MODEL || 'google/vit-base-patch16-224';
+const HF_TOKEN = process.env.HUGGINGFACE_API_TOKEN || '';
+const HF_TIMEOUT = Number(process.env.HUGGINGFACE_TIMEOUT_MS || 60000);
+
+const REDIS_URL = process.env.REDIS_URL || null;
+
+// Optional redis caching - only used if you initialize a redis client below
+let redisClient = null;
+if (REDIS_URL && !global.__redis_initialized) {
+  try {
+    // lazy require ioredis to avoid adding it if you don't want
+    const IORedis = require('ioredis');
+    redisClient = new IORedis(REDIS_URL);
+    global.__redis_initialized = true;
+    console.log('Redis cache for AI service enabled.');
+  } catch (err) {
+    console.warn('ioredis not available or failed to connect. Continuing without cache.');
+    redisClient = null;
   }
-  return modelPromise;
-};
+}
 
-/**
- * Map mobilenet label text to project categories. This is fuzzy: we use substr matching.
- */
-const mapLabelToCategory = (label) => {
-  const text = (label || '').toLowerCase();
-  if (text.includes('pothole') || text.includes('asphalt') || text.includes('road')) return 'Pothole';
-  if (text.includes('streetlight') || text.includes('lamp') || text.includes('light')) return 'Streetlight Out';
-  if (text.includes('trash') || text.includes('garbage') || text.includes('bin')) return 'Trash Overflow';
-  if (text.includes('graffiti') || text.includes('spray')) return 'Graffiti';
-  if (text.includes('water') || text.includes('leak') || text.includes('pipe')) return 'Water Leak';
-  if (text.includes('traffic') || text.includes('signal') || text.includes('stoplight')) return 'Traffic Signal';
-  if (text.includes('park') || text.includes('bench') || text.includes('playground')) return 'Park Maintenance';
-  return 'Other';
-};
+// Lazy local tfjs support
+let tf = null;
+let localModel = null;
+let localAttempted = false;
 
-/**
- * Fetch URL and return Buffer
- */
-const fetchImageBuffer = async (url) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
-  return Buffer.from(await res.arrayBuffer());
-};
+/** try to load tfjs-node and a local model (if MODEL_LOCAL_PATH set) */
+async function tryLoadLocalModel() {
+  if (localAttempted) return;
+  localAttempted = true;
+  try {
+    tf = require('@tensorflow/tfjs-node'); // may throw if not installed
+    const MODEL_LOCAL_PATH = process.env.MODEL_LOCAL_PATH || '';
+    if (!MODEL_LOCAL_PATH) {
+      console.warn('tfjs-node found but MODEL_LOCAL_PATH not set — skipping local model load.');
+      return;
+    }
+    // attempt to load either tfjs layers model (model.json) or SavedModel
+    const modelJson = path.join(MODEL_LOCAL_PATH, 'model.json');
+    if (fs.existsSync(modelJson)) {
+      localModel = await tf.loadLayersModel(`file://${modelJson}`);
+      console.log('Loaded local TFJS layers model from', modelJson);
+    } else {
+      // fallback attempt to load saved model (tf.node)
+      try {
+        localModel = await tf.node.loadSavedModel(MODEL_LOCAL_PATH);
+        console.log('Loaded local TF SavedModel from', MODEL_LOCAL_PATH);
+      } catch (inner) {
+        console.warn('No loadable TF model at MODEL_LOCAL_PATH:', MODEL_LOCAL_PATH);
+      }
+    }
+  } catch (err) {
+    tf = null;
+    localModel = null;
+    console.warn('Local tfjs not available / failed to load:', err.message);
+  }
+}
 
-/**
- * Compute a simple edge-area percent using a Sobel operator on a small grayscale image.
- * Returns fraction [0..1] of pixels above edge threshold.
- *
- * Input:
- *   buffer - image buffer
- *   options: { width } - resize width (keeps aspect)
- */
-const computeEdgeAreaPercent = async (buffer, options = {}) => {
-  // Resize to a small, fixed size to keep compute bounded.
-  const targetWidth = options.width || 160; // small for speed
-  // Convert to greyscale and extract raw pixels
-  const img = sharp(buffer).greyscale().resize(targetWidth, null, { fit: 'inside' });
-  const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
-  const width = info.width;
-  const height = info.height;
-  const pixels = data; // Uint8Array of length width*height, greyscale
+/** helper: hash buffer to produce cache key */
+function bufferHash(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
 
-  // Sobel kernels
-  const gx = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-  const gy = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+/** optional: store/retrieve cache in redis */
+async function cacheGet(key) {
+  if (!redisClient) return null;
+  try {
+    const v = await redisClient.get(key);
+    return v ? JSON.parse(v) : null;
+  } catch (err) {
+    console.warn('Redis get error:', err.message);
+    return null;
+  }
+}
+async function cacheSet(key, value, ttlSeconds = 3600) {
+  if (!redisClient) return;
+  try {
+    await redisClient.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+  } catch (err) {
+    console.warn('Redis set error:', err.message);
+  }
+}
 
-  let edgeCount = 0;
-  const threshold = 60; // tuneable: magnitude above which pixel considered 'edge'
-  // iterate skipping border
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      let sx = 0;
-      let sy = 0;
-      let k = 0;
-      for (let ky = -1; ky <= 1; ky++) {
-        for (let kx = -1; kx <= 1; kx++, k++) {
-          const px = pixels[(y + ky) * width + (x + kx)];
-          sx += gx[k] * px;
-          sy += gy[k] * px;
+/** Preprocess image buffer -> tensor for common vision models (example: resize 224x224) */
+function preprocessImageBufferToTensor(buffer, targetSize = 224) {
+  if (!tf) throw new Error('tf not available for preprocessing');
+  const decoded = tf.node.decodeImage(buffer, 3); // [h,w,3]
+  const resized = tf.image.resizeBilinear(decoded, [targetSize, targetSize]);
+  const normalized = resized.toFloat().div(tf.scalar(255.0)).expandDims(0); // [1,h,w,3]
+  return normalized;
+}
+
+/** Local predict wrapper (depends on your model outputs) */
+async function localPredictFromBuffer(buffer) {
+  if (!tf) throw new Error('tf not loaded');
+  if (!localModel) throw new Error('localModel not loaded');
+  const inputTensor = preprocessImageBufferToTensor(buffer, Number(process.env.MODEL_INPUT_SIZE || 224));
+  const out = localModel.predict(inputTensor);
+  let raw = null;
+  if (Array.isArray(out)) {
+    raw = await Promise.all(out.map(o => (o.array ? o.array() : o.data())));
+  } else if (out.array) {
+    raw = await out.array();
+  } else if (out.data) {
+    raw = await out.data();
+  } else {
+    raw = out;
+  }
+  // Minimal normalization: wrap into expected shape
+  const result = { raw, source: 'local' };
+  // Cleanup if tensors
+  try { if (inputTensor.dispose) inputTensor.dispose(); } catch (e) {}
+  return result;
+}
+
+/** Call your internal model service (fastapi) */
+async function remoteModelServicePredict(buffer, filename = 'image.jpg') {
+  if (!MODEL_SERVICE_URL) throw new Error('MODEL_SERVICE_URL not configured');
+  const url = MODEL_SERVICE_URL.replace(/\/$/, '') + '/analyze';
+  // Use axios with multipart/form-data
+  const FormData = require('form-data');
+  const form = new FormData();
+  form.append('file', buffer, { filename, contentType: 'application/octet-stream' });
+  const headers = form.getHeaders();
+  const resp = await axios.post(url, form, {
+    headers,
+    timeout: Number(process.env.MODEL_SERVICE_TIMEOUT_MS || 120000)
+  });
+  return resp.data;
+}
+
+/** Call Hugging Face Inference API (binary body) */
+async function huggingFacePredict(buffer, model = HF_MODEL, timeout = HF_TIMEOUT) {
+  if (!HF_TOKEN) throw new Error('HUGGINGFACE_API_TOKEN not set in env');
+  const url = `${HF_API_BASE}/${model}`;
+  const headers = {
+    Authorization: `Bearer ${HF_TOKEN}`,
+    'Content-Type': 'application/octet-stream',
+    Accept: 'application/json'
+  };
+
+  const resp = await axios.post(url, buffer, { headers, responseType: 'json', timeout });
+  return resp.data;
+}
+
+/** Normalize different model responses to { label, severity, confidence } */
+function normalizeModelOutput(raw) {
+  // raw can be many shapes depending on model:
+  // - HF classification model: [{label: 'LABEL', score: 0.9}, ...]
+  // - detection: dict
+  // - custom: { label, severity, confidence }
+  try {
+    if (!raw) return null;
+
+    // Case A: HF classification array
+    if (Array.isArray(raw) && raw.length && raw[0].label && typeof raw[0].score === 'number') {
+      const top = raw[0];
+      // simple severity mapping: confidence * heuristic
+      const confidence = top.score;
+      const label = top.label;
+      let severity = 0.5;
+      // try to parse label for severity keywords
+      const l = label.toLowerCase();
+      if (l.includes('severe') || l.includes('high') || l.includes('critical')) severity = Math.min(1, 0.8 + confidence * 0.2);
+      else if (l.includes('moderate') || l.includes('medium')) severity = 0.5 + confidence * 0.3;
+      else if (l.includes('minor') || l.includes('low')) severity = 0.2 + confidence * 0.3;
+      else severity = Math.min(1, 0.3 + confidence * 0.7);
+
+      return { label, severity: Number(severity.toFixed(3)), confidence: Number(confidence.toFixed(3)), raw };
+    }
+
+    // Case B: already normalized object
+    if (raw.label && typeof raw.severity !== 'undefined' && typeof raw.confidence !== 'undefined') {
+      return { label: raw.label, severity: Number(raw.severity), confidence: Number(raw.confidence), raw };
+    }
+
+    // Case C: HF responses that are objects with scores field (some models)
+    if (raw && typeof raw === 'object') {
+      // find best label in object -> score map
+      const pairs = [];
+      for (const k of Object.keys(raw)) {
+        const v = raw[k];
+        if (Array.isArray(v) && v.length && v[0].label && typeof v[0].score === 'number') {
+          pairs.push(...v.map(x => ({ label: x.label, score: x.score })));
         }
       }
-      const mag = Math.sqrt(sx * sx + sy * sy);
-      if (mag > threshold) edgeCount++;
+      if (pairs.length) {
+        pairs.sort((a, b) => b.score - a.score);
+        const top = pairs[0];
+        const confidence = top.score;
+        const label = top.label;
+        const severity = Math.min(1, 0.4 + confidence * 0.6);
+        return { label, severity: Number(severity.toFixed(3)), confidence: Number(confidence.toFixed(3)), raw };
+      }
     }
-  }
 
-  const total = (width - 2) * (height - 2);
-  const frac = total <= 0 ? 0 : edgeCount / total;
-  return frac;
-};
+    // Fallback: stringify and return neutral
+    return { label: 'unknown', severity: 0.5, confidence: 0.5, raw };
+  } catch (err) {
+    console.warn('normalizeModelOutput error:', err.message);
+    return { label: 'unknown', severity: 0.5, confidence: 0.5, raw };
+  }
+}
 
 /**
- * analyzeImage:
- * - image parameter may be Buffer or a URL string
- * - returns tags, determinedCategory, severityScore (0-100), damageAreaPercent (0..1)
+ * Public: analyzeImageBuffer(buffer)
+ * returns { label, severity, confidence, raw, source }
  */
-const analyzeImage = async (image) => {
+async function analyzeImageBuffer(buffer, opts = {}) {
+  if (!buffer || !Buffer.isBuffer(buffer)) throw new Error('Buffer required');
+
+  const cacheKey = `ai:img:${bufferHash(buffer)}`;
+  // 1) try cache
   try {
-    let buffer;
-    if (Buffer.isBuffer(image)) {
-      buffer = image;
-    } else if (typeof image === 'string') {
-      buffer = await fetchImageBuffer(image);
-    } else {
-      throw new Error('analyzeImage expects a Buffer or URL string');
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      cached._cached = true;
+      return cached;
     }
-
-    // load model
-    const model = await loadModel();
-
-    // create tensor using tf.node.decodeImage -> shape [h,w,3]
-    const tensor = tf.node.decodeImage(buffer, 3);
-    // mobilenet.classify accepts either an image Element or a tensor
-    const predictions = await model.classify(tensor, 5); // top 5
-    tensor.dispose();
-
-    // normalize predictions: ensure array with {className, probability}
-    const tags = (predictions || []).map(p => ({
-      className: p.className,
-      probability: typeof p.probability === 'number' ? p.probability : (p.score || 0)
-    }));
-
-    // pick top prediction
-    const top = tags[0] || { className: 'unknown', probability: 0 };
-
-    // map to project category
-    const determinedCategory = mapLabelToCategory(top.className);
-
-    // compute damageAreaPercent (edge coverage)
-    let damageAreaPercent = 0;
-    try {
-      damageAreaPercent = await computeEdgeAreaPercent(buffer, { width: 160 });
-      // clamp
-      if (!isFinite(damageAreaPercent) || damageAreaPercent < 0) damageAreaPercent = 0;
-      if (damageAreaPercent > 1) damageAreaPercent = 1;
-    } catch (err) {
-      // non-fatal; keep damageAreaPercent = 0
-      console.warn('computeEdgeAreaPercent failed:', err.message || err);
-      damageAreaPercent = 0;
-    }
-
-    // severity heuristic:
-    // base = top.probability (0..1)
-    // severity = base * (0.6 + 0.4 * damageAreaPercent)
-    // scale to 0..100
-    const base = Math.max(0, Math.min(1, top.probability || 0));
-    const severityFloat = base * (0.6 + 0.4 * damageAreaPercent);
-    const severityScore = Math.round(Math.min(1, severityFloat) * 100);
-
-    return {
-      tags,
-      determinedCategory,
-      severityScore,
-      damageAreaPercent
-    };
-  } catch (err) {
-    console.error('analyzeImage error:', err.message || err);
-    // return safe defaults (so callers don't crash)
-    return {
-      tags: [],
-      determinedCategory: 'Other',
-      severityScore: 0,
-      damageAreaPercent: 0
-    };
+  } catch (e) {
+    // ignore cache errors
   }
-};
 
-module.exports = {
-  analyzeImage,
-  // expose internals for tests if needed:
-  _internal: { loadModel, computeEdgeAreaPercent, mapLabelToCategory }
-};
+  // 2) try local TF model
+  await tryLoadLocalModel();
+  if (localModel) {
+    try {
+      const localRaw = await localPredictFromBuffer(buffer);
+      const normalized = normalizeModelOutput(localRaw.raw || localRaw);
+      normalized.source = 'local';
+      await cacheSet(cacheKey, normalized, Number(process.env.AI_CACHE_TTL || 3600));
+      return normalized;
+    } catch (err) {
+      console.warn('local model inference failed:', err.message);
+    }
+  }
+
+  // 3) try internal model service
+  if (MODEL_SERVICE_URL) {
+    try {
+      const resp = await remoteModelServicePredict(buffer, opts.filename || 'image.jpg');
+      const normalized = normalizeModelOutput(resp);
+      normalized.source = 'modelservice';
+      await cacheSet(cacheKey, normalized, Number(process.env.AI_CACHE_TTL || 3600));
+      return normalized;
+    } catch (err) {
+      console.warn('modelservice inference failed:', err.message);
+    }
+  }
+
+  // 4) try Hugging Face Inference API
+  if (HF_TOKEN) {
+    try {
+      const hfRaw = await huggingFacePredict(buffer, HF_MODEL, HF_TIMEOUT);
+      const normalized = normalizeModelOutput(hfRaw);
+      normalized.source = 'huggingface';
+      await cacheSet(cacheKey, normalized, Number(process.env.AI_CACHE_TTL || 3600));
+      return normalized;
+    } catch (err) {
+      console.warn('Hugging Face inference failed:', err.message);
+    }
+  }
+
+  // 5) fallback mock
+  console.warn('AI fallback: returning mock result');
+  const fallback = { label: 'unknown', severity: 0.5, confidence: 0.5, source: 'mock' };
+  await cacheSet(cacheKey, fallback, 60);
+  return fallback;
+}
+
+module.exports = { analyzeImageBuffer, tryLoadLocalModel };
